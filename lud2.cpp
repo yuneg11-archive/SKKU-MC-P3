@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
 #include <mpi.h>
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
@@ -78,9 +79,50 @@ void matrix_multiply(double *mat_out, double *mat1, double *mat2, int mat_row_le
             }
             if (mode == -1) {
                 mat_out[i * mat_col_len + j] -= sum;
+            } else if (mode == 1) {
+                mat_out[i * mat_col_len + j] += sum;
             } else {
                 mat_out[i * mat_col_len + j] = sum;
             }
+        }
+    }
+}
+
+void lu_extract(double *mat_l, double *mat_u, double *mat_lu, int mat_len, int mat_row_len, int mat_col_len) {
+    for (int i = 0; i < mat_row_len; i++) {
+        for (int j = 0; j < i; j++) {
+            mat_l[i * mat_len + j] = mat_lu[i * mat_col_len + j];
+            mat_u[i * mat_col_len + j] = 0;
+        }
+        mat_l[i * mat_len + i] = 1;
+        mat_u[i * mat_len + i] = mat_lu[i * mat_col_len + i];
+        for (int j = i+1; j < mat_col_len; j++) {
+            mat_l[i * mat_len + j] = 0;
+            mat_u[i * mat_col_len + j] = mat_lu[i * mat_col_len + j];
+        }
+        for (int j = mat_col_len; j < mat_len; j++) {
+            mat_l[i * mat_len + j] = 0;
+        }
+    }
+    for (int i = mat_row_len; i < mat_len; i++) {
+        for (int j = 0; j < mat_len; j++) {
+            mat_u[i * mat_col_len + j] = 0;
+        }
+    }
+}
+
+void l_extract(double *mat_l, double *mat_lu, int mat_len, int mat_row_len) {
+    for (int i = 0; i < mat_row_len; i++) {
+        for (int j = 0; j < mat_len; j++) {
+            mat_l[i * mat_len + j] = mat_lu[i * mat_len + j];
+        }
+    }
+}
+
+void u_extract(double *mat_u, double *mat_lu, int mat_len, int mat_col_len) {
+    for (int i = 0; i < mat_len; i++) {
+        for (int j = 0; j < mat_col_len; j++) {
+            mat_u[i * mat_col_len + j] = mat_lu[i * mat_col_len + j];
         }
     }
 }
@@ -116,12 +158,12 @@ int main(int argc, char *argv[]) {
         int calc_order = (row_order < col_order ? row_order : col_order);
 
         for (int i = 0; i < comm_per_line-1; i++) {
-            row_rank[i] = (col_order >= i && row_order >= i ? row_order - i : -1);
-            col_rank[i] = (col_order >= i && row_order >= i ? col_order - i : -1);
+            row_rank[i] = (col_order >= i && row_order >= i ? col_order - i : -1);
+            col_rank[i] = (col_order >= i && row_order >= i ? row_order - i : -1);
         }
 
-        MPI_Comm_split(MPI_COMM_WORLD, rank % comm_per_line, rank, &row_comm[0]);
-        MPI_Comm_split(MPI_COMM_WORLD, rank / comm_per_line, rank, &col_comm[0]);
+        MPI_Comm_split(MPI_COMM_WORLD, rank / comm_per_line, rank, &row_comm[0]);
+        MPI_Comm_split(MPI_COMM_WORLD, rank % comm_per_line, rank, &col_comm[0]);
         for (int i = 1; i <= calc_order+1 && i < comm_per_line-1; i++) {
             MPI_Comm_split(row_comm[i-1], (row_rank[i-1] == 0 ? 0 : 1), row_rank[i-1], &row_comm[i]);
             MPI_Comm_split(col_comm[i-1], (col_rank[i-1] == 0 ? 0 : 1), col_rank[i-1], &col_comm[i]);
@@ -129,20 +171,19 @@ int main(int argc, char *argv[]) {
 
         // Allocation
         int sub_mat_len = mat_len / comm_per_line + (mat_len % comm_per_line == 0 ? 0 : 1);
-        int sub_mat_row_len = sub_mat_len - (row_rank[0] == comm_per_line-1 ? comm_per_line - mat_len % comm_per_line : 0);
-        int sub_mat_col_len = sub_mat_len - (col_rank[0] == comm_per_line-1 ? comm_per_line - mat_len % comm_per_line : 0);
+        int sub_mat_row_len = sub_mat_len - (row_order == comm_per_line-1 ? comm_per_line - mat_len % comm_per_line : 0);
+        int sub_mat_col_len = sub_mat_len - (col_order == comm_per_line-1 ? comm_per_line - mat_len % comm_per_line : 0);
         int sub_mat_row_base = sub_mat_len * row_order;
         int sub_mat_col_base = sub_mat_len * col_order;
-        int sub_mat_l_row_len = sub_mat_len;
-        int sub_mat_l_col_len = sub_mat_col_len;
-        int sub_mat_u_row_len = sub_mat_row_len;
-        int sub_mat_u_col_len = sub_mat_len;
+        int sub_mat_l_row_len = sub_mat_row_len;
+        int sub_mat_l_col_len = sub_mat_len;
+        int sub_mat_u_row_len = sub_mat_len;
+        int sub_mat_u_col_len = sub_mat_col_len;
 
         double *sub_mat = new double[sub_mat_row_len * sub_mat_col_len];
         double *sub_mat_lu = new double[sub_mat_row_len * sub_mat_col_len];
         double *sub_mat_l = new double[sub_mat_l_row_len * sub_mat_l_col_len];
         double *sub_mat_u = new double[sub_mat_u_row_len * sub_mat_u_col_len];
-        double *sub_mat_recon = new double[sub_mat_len * sub_mat_len];
 
         // Build Matrix
         srand(seed);
@@ -168,39 +209,110 @@ int main(int argc, char *argv[]) {
             if (row_rank[step] == 0 && col_rank[step] == 0) {
                 lu_decompose(sub_mat_lu, sub_mat_row_len);
                 if (step < comm_per_line-1) {
-                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, row_comm[step]); // Send L to horizontal ones
-                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, col_comm[step]); // Send U to vertical ones
+                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, row_comm[step]); // Send L
+                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, col_comm[step]); // Send U
                 }
-            } else if (col_rank[step] == 0) { // Horizontal ones
+                lu_extract(sub_mat_l, sub_mat_u, sub_mat_lu, sub_mat_len, sub_mat_row_len, sub_mat_col_len);
+            } else if (col_rank[step] == 0) {
                 MPI_Bcast(sub_mat_l, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, 0, row_comm[step]); // Receive L
                 l_inverse(sub_mat_l, sub_mat_l_row_len);
                 l_multiply(sub_mat_lu, sub_mat_l, sub_mat, sub_mat_l_row_len, sub_mat_col_len);
-                MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, col_comm[step]); // Send U to vertical ones
-            } else if (row_rank[step] == 0) { // Vertical ones
+                MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, col_comm[step]); // Send U
+                u_extract(sub_mat_u, sub_mat_lu, sub_mat_len, sub_mat_col_len);
+            } else if (row_rank[step] == 0) {
                 MPI_Bcast(sub_mat_u, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, 0, col_comm[step]); // Receive U
                 u_inverse(sub_mat_u, sub_mat_u_row_len);
                 u_multiply(sub_mat_lu, sub_mat, sub_mat_u, sub_mat_row_len, sub_mat_u_col_len);
-                MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, row_comm[step]); // Send L to horizontal ones
+                MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, row_comm[step]); // Send L
+                l_extract(sub_mat_l, sub_mat_lu, sub_mat_len, sub_mat_row_len);
             } else {
                 MPI_Bcast(sub_mat_l, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, 0, row_comm[step]); // Receive L
                 MPI_Bcast(sub_mat_u, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, 0, col_comm[step]); // Receive U
-                matrix_multiply(sub_mat_lu, sub_mat_l, sub_mat_u, sub_mat_row_len, sub_mat_l_col_len, sub_mat_col_len, -1);
+                matrix_multiply(sub_mat_lu, sub_mat_l, sub_mat_u, sub_mat_row_len, sub_mat_len, sub_mat_col_len, -1);
+            }
+        }
+
+        // Reconstruct Matrix
+        double *sub_mat_recon = new double[sub_mat_len * sub_mat_len](); // Initialize with 0
+        double *sub_mat_l_buf = new double[sub_mat_l_row_len * sub_mat_l_col_len];
+        double *sub_mat_u_buf = new double[sub_mat_u_row_len * sub_mat_u_col_len];
+        MPI_Request req[4];
+        bool req_valid[4] = {false, false, false, false};
+        if (row_order >= col_order) {
+            if (row_order < comm_per_line-1) {
+                MPI_Isend(sub_mat_l, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, comm_per_line - row_order + col_order - 1, 0, row_comm[0], &req[0]);  // Send L
+                req_valid[0] = true;
+            } else {
+                double *temp = sub_mat_l_buf; sub_mat_l_buf = sub_mat_l; sub_mat_l = temp;
+            }
+        }
+        if (row_order <= col_order) {
+            if (col_order < comm_per_line-1) {
+                MPI_Isend(sub_mat_u, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, comm_per_line - col_order + row_order - 1, 0, col_comm[0], &req[1]); // Send U
+                req_valid[1] = true;
+            } else {
+                double *temp = sub_mat_u_buf; sub_mat_u_buf = sub_mat_u; sub_mat_u = temp;
+            }
+        }
+        if (col_order >= comm_per_line - row_order - 1) {
+            if (row_order < comm_per_line-1) {
+                MPI_Irecv(sub_mat_l_buf, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, - comm_per_line + row_order + col_order + 1, 0, row_comm[0], &req[2]); // Receive L
+                req_valid[2] = true;
+            }
+            if (col_order < comm_per_line-1) {
+                MPI_Irecv(sub_mat_u_buf, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, - comm_per_line + row_order + col_order + 1, 0, col_comm[0], &req[3]); // Receive U
+                req_valid[3] = true;
+            }
+        }
+        for (int i = 0; i < 4; i++) {
+            if (req_valid[i] == true) {
+                MPI_Wait(&req[i], MPI_STATUS_IGNORE);
+                req_valid[i] = false;
+            }
+        }
+
+        int l_dest = (col_order + 1) % comm_per_line;
+        int l_src = (col_order - 1 < 0 ? comm_per_line - 1 : col_order - 1);
+        int u_dest = (row_order + 1) % comm_per_line;
+        int u_src = (row_order - 1 < 0 ? comm_per_line - 1 : row_order - 1);
+        for (int step = 0; step < comm_per_line; step++) {
+            bool row_activate = (step + (step < col_order + 1 ? comm_per_line : 0) <= row_order + col_order + 1);
+            bool col_activate = (step + (step < row_order + 1 ? comm_per_line : 0) <= row_order + col_order + 1);
+            bool next_row_activate = (step+1 + (step+1 < col_order + 1 ? comm_per_line : 0) <= row_order + col_order + 1);
+            bool next_col_activate = (step+1 + (step+1 < row_order + 1 ? comm_per_line : 0) <= row_order + col_order + 1);
+            bool calc_activate = row_activate && col_activate;
+
+            double *temp_l = sub_mat_l_buf; sub_mat_l_buf = sub_mat_l; sub_mat_l = temp_l;
+            double *temp_u = sub_mat_u_buf; sub_mat_u_buf = sub_mat_u; sub_mat_u = temp_u;
+
+            if (row_activate == true && step < comm_per_line-1) {
+                MPI_Isend(sub_mat_l, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, l_dest, step+1, row_comm[0], &req[0]);
+                req_valid[0] = true;
+            }
+            if (col_activate == true && step < comm_per_line-1) {
+                MPI_Isend(sub_mat_u, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, u_dest, step+1, col_comm[0], &req[1]);
+                req_valid[1] = true;
+            }
+            if (next_row_activate == true && step < comm_per_line-1) {
+                MPI_Irecv(sub_mat_l_buf, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, l_src, step+1, row_comm[0], &req[2]);
+                req_valid[2] = true;
+            }
+            if (next_col_activate == true && step < comm_per_line-1) {
+                MPI_Irecv(sub_mat_u_buf, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, u_src, step+1, col_comm[0], &req[3]);
+                req_valid[3] = true;
+            }
+            if (calc_activate == true) {
+                matrix_multiply(sub_mat_recon, sub_mat_l, sub_mat_u, sub_mat_row_len, sub_mat_len, sub_mat_col_len, +1);
+            }
+            for (int i = 0; i < 4; i++) {
+                if (req_valid[i] == true) {
+                    MPI_Wait(&req[i], MPI_STATUS_IGNORE);
+                    req_valid[i] = false;
+                }
             }
         }
 
         /*
-        // Reconstruct Matrix
-        for (int i = 0; i < mat_len; i++) {
-            for (int j = 0; j < mat_len; j++) {
-                int min_idx = min(i - 1, j);
-                matrixB[i * mat_len + j] = (j >= i ? matrixLU[i * mat_len + j] : 0);
-                for (int k = 0; k <= min_idx; k++) {
-                    matrixB[i * mat_len + j] += matrixLU[i * mat_len + k] * matrixLU[k * mat_len + j];
-                }
-                matrixB[i * mat_len + j] = matrixB[i * mat_len + j];
-            }
-        }
-
         // Calculate Matrix Difference
         double diff = 0;
         for (int j = 0; j < mat_len; j++) {
