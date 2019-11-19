@@ -83,6 +83,36 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // LU Decomposition
+        for (int step = 0; step <= calc_order; step++) {
+            if (row_rank[step] == 0 && col_rank[step] == 0) {
+                for (int k = 0; k < sub_mat_row_len; k++) {
+                    for (int i = k + 1; i < sub_mat_row_len; i++) {
+                        sub_mat_lu[i * sub_mat_col_len + k] /= sub_mat_lu[k * sub_mat_col_len + k];
+                    }
+                    for (int i = k + 1; i < sub_mat_row_len; i++) {
+                        for (int j = k + 1; j < sub_mat_col_len; j++) {
+                            sub_mat_lu[i * sub_mat_col_len + j] -= sub_mat_lu[i * sub_mat_col_len + k] * sub_mat_lu[k * sub_mat_col_len + j];
+                        }
+                    }
+                }
+                if (step < comm_per_line-1) {
+                    printf("%2d (%d, %d) - L Send %d\n", rank, row_rank[0], col_rank[0], step);
+                    printf("%2d (%d, %d) - U Send %d\n", rank, row_rank[0], col_rank[0], step);
+                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, col_comm[step]); // Send to horizontal ones
+                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, row_comm[step]); // Send to vertical ones
+                }
+            } else if (row_rank[step] == 0) { // Horizontal ones
+                MPI_Bcast(sub_mat_l, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, 0, col_comm[step]);
+                printf("%2d (%d, %d) - L Recv %d\n", rank, row_rank[0], col_rank[0], step);
+            } else if (col_rank[step] == 0) { // Vertical ones
+                MPI_Bcast(sub_mat_u, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, 0, row_comm[step]);
+                printf("%2d (%d, %d) - U Recv %d\n", rank, row_rank[0], col_rank[0], step);
+            } else {
+
+            }
+        }
+
         /*
         // LU Decomposition
         for (int k = 0; k < mat_len; k++) {
