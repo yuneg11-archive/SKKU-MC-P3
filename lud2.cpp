@@ -69,6 +69,22 @@ void u_multiply(double *mat_l, double *mat, double *mat_u, int mat_row_len, int 
     }
 }
 
+void matrix_multiply(double *mat_out, double *mat1, double *mat2, int mat_row_len, int mat_inter_len, int mat_col_len, int mode) {
+    for (int i = 0; i < mat_row_len; i++) {
+        for (int j = 0; j < mat_col_len; j++) {
+            double sum = 0;
+            for (int k = 0; k < mat_inter_len; k++) {
+                sum += mat1[i * mat_inter_len + k] * mat2[k * mat_col_len + j];
+            }
+            if (mode == -1) {
+                mat_out[i * mat_col_len + j] -= sum;
+            } else {
+                mat_out[i * mat_col_len + j] = sum;
+            }
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 3) {
         printf("Usage: %s <matrix_size> <seed_number>\n", argv[0]);
@@ -152,19 +168,23 @@ int main(int argc, char *argv[]) {
             if (row_rank[step] == 0 && col_rank[step] == 0) {
                 lu_decompose(sub_mat_lu, sub_mat_row_len);
                 if (step < comm_per_line-1) {
-                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, col_comm[step]); // Send to horizontal ones
-                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, row_comm[step]); // Send to vertical ones
+                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, row_comm[step]); // Send L to horizontal ones
+                    MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, col_comm[step]); // Send U to vertical ones
                 }
-            } else if (row_rank[step] == 0) { // Horizontal ones
-                MPI_Bcast(sub_mat_l, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, 0, col_comm[step]);
+            } else if (col_rank[step] == 0) { // Horizontal ones
+                MPI_Bcast(sub_mat_l, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, 0, row_comm[step]); // Receive L
                 l_inverse(sub_mat_l, sub_mat_l_row_len);
                 l_multiply(sub_mat_lu, sub_mat_l, sub_mat, sub_mat_l_row_len, sub_mat_col_len);
-            } else if (col_rank[step] == 0) { // Vertical ones
-                MPI_Bcast(sub_mat_u, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, 0, row_comm[step]);
+                MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, col_comm[step]); // Send U to vertical ones
+            } else if (row_rank[step] == 0) { // Vertical ones
+                MPI_Bcast(sub_mat_u, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, 0, col_comm[step]); // Receive U
                 u_inverse(sub_mat_u, sub_mat_u_row_len);
                 u_multiply(sub_mat_lu, sub_mat, sub_mat_u, sub_mat_row_len, sub_mat_u_col_len);
+                MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, row_comm[step]); // Send L to horizontal ones
             } else {
-
+                MPI_Bcast(sub_mat_l, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, 0, row_comm[step]); // Receive L
+                MPI_Bcast(sub_mat_u, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, 0, col_comm[step]); // Receive U
+                matrix_multiply(sub_mat_lu, sub_mat_l, sub_mat_u, sub_mat_row_len, sub_mat_l_col_len, sub_mat_col_len, -1);
             }
         }
 
