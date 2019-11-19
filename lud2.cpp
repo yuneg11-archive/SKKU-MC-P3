@@ -2,7 +2,6 @@
 #include <cstdlib>
 #include <cmath>
 #include <mpi.h>
-#include "sys/time.h"
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
 
@@ -12,15 +11,8 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    struct timeval start;
-    struct timeval end;
-
     int mat_len = atoi(argv[1]);
     int seed = atoi(argv[2]);
-
-    double *matrixA = new double[mat_len * mat_len];
-    double *matrixLU = new double[mat_len * mat_len];
-    double *matrixB = new double[mat_len * mat_len];
 
     if (MPI_Init(NULL, NULL) != 0) {
         printf("Error: MPI_Init failed\n");
@@ -55,17 +47,44 @@ int main(int argc, char *argv[]) {
             MPI_Comm_split(col_comm[i-1], (col_rank[i-1] == 0 ? 0 : 1), col_rank[i-1], &col_comm[i]);
         }
 
+        // Allocation
+        int sub_mat_len = mat_len / comm_per_line + (mat_len % comm_per_line == 0 ? 0 : 1);
+        int sub_mat_row_len = sub_mat_len - (row_rank[0] == comm_per_line-1 ? comm_per_line - mat_len % comm_per_line : 0);
+        int sub_mat_col_len = sub_mat_len - (col_rank[0] == comm_per_line-1 ? comm_per_line - mat_len % comm_per_line : 0);
+        int sub_mat_row_base = sub_mat_len * row_order;
+        int sub_mat_col_base = sub_mat_len * col_order;
+        int sub_mat_l_row_len = sub_mat_len;
+        int sub_mat_l_col_len = sub_mat_col_len;
+        int sub_mat_u_row_len = sub_mat_row_len;
+        int sub_mat_u_col_len = sub_mat_len;
+
+        double *sub_mat = new double[sub_mat_len * sub_mat_len];
+        double *sub_mat_lu = new double[sub_mat_len * sub_mat_len];
+        double *sub_mat_l = new double[sub_mat_l_row_len * sub_mat_l_col_len];
+        double *sub_mat_u = new double[sub_mat_u_row_len * sub_mat_u_col_len];
+        double *sub_mat_recon = new double[sub_mat_len * sub_mat_len];
+
         // Build Matrix
         srand(seed);
-        for (int i = 0; i < mat_len; i++) {
-            for (int j = 0; j < mat_len; j++) {
-                matrixA[i * mat_len + j] = matrixLU[i * mat_len + j] = (double)rand();
+        for (int row = 0; row < sub_mat_row_base; row++) {
+            for (int col = 0; col < mat_len; col++) {
+                rand();
+            }
+        }
+        for (int row = 0; row < sub_mat_row_len; row++) {
+            for (int col = 0; col < sub_mat_col_base; col++) {
+                rand();
+            }
+            for (int col = 0; col < sub_mat_col_len; col++) {
+                sub_mat[row * sub_mat_col_len + col] = sub_mat_lu[row * sub_mat_col_len + col] = (double)rand();
+            }
+            for (int col = sub_mat_col_base + sub_mat_col_len; col < mat_len; col++) {
+                rand();
             }
         }
 
+        /*
         // LU Decomposition
-        gettimeofday(&start, NULL);
-
         for (int k = 0; k < mat_len; k++) {
             for (int i = k + 1; i < mat_len; i++) {
                 matrixLU[i * mat_len + k] /= matrixLU[k * mat_len + k];
@@ -76,9 +95,6 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-
-        gettimeofday(&end, NULL);
-        printf("LU Decomposition: %f s\n",(end.tv_sec-start.tv_sec)+(float)(end.tv_usec-start.tv_usec) / 1000000.0);
 
         // Reconstruct Matrix
         for (int i = 0; i < mat_len; i++) {
@@ -101,18 +117,14 @@ int main(int argc, char *argv[]) {
             }
             diff += sqrt(row_sum);
         }
-        printf("Sum of difference: %.10lf\n", diff);
+        printf("%.10lf\n", diff);
+        */
     }
 
     if (MPI_Finalize() != 0) {
         printf("Error: MPI_Finalize failed\n");
         return -1;
     }
-
-    // Memory Deallocation
-    delete [] matrixA;
-    delete [] matrixLU;
-    delete [] matrixB;
 
     return 0;
 }
