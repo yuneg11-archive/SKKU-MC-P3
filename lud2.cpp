@@ -5,6 +5,70 @@
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
 
+void lu_decompose(double *mat, int len) {
+    for (int k = 0; k < len; k++) {
+        for (int i = k + 1; i < len; i++) {
+            mat[i * len + k] /= mat[k * len + k];
+        }
+        for (int i = k + 1; i < len; i++) {
+            for (int j = k + 1; j < len; j++) {
+                mat[i * len + j] -= mat[i * len + k] * mat[k * len + j];
+            }
+        }
+    }
+}
+
+void l_inverse(double *mat, int len) {
+    for (int i = 0; i < len; i++) {
+        mat[i * len + i] = 1;
+        for (int j = 0; j < i; j++) {
+            double sum = 0;
+            for (int k = 0; k < i; k++) {
+                sum -= mat[i * len + k] * mat[k * len + j];
+            }
+            mat[i * len + j] = sum;
+        }
+        for (int j = i+1; j < len; j++) {
+            mat[i * len + j] = 0;
+        }
+    }
+}
+
+void l_multiply(double *mat_u, double *mat_l, double *mat, int mat_l_len, int mat_col_len) {
+    for (int i = 0; i < mat_l_len; i++) {
+        for (int j = 0; j < mat_col_len; j++) {
+            mat_u[i * mat_col_len + j] = 0;
+            for (int k = 0; k <= i; k++) {
+                mat_u[i * mat_col_len + j] += mat_l[i * mat_l_len + k] * mat[k * mat_col_len + j];
+            }
+        }
+    }
+}
+
+void u_inverse(double *mat, int len) {
+    for (int i = len-1; i >= 0; i--) {
+        mat[i * len + i] = 1 / mat[i * len + i];
+        for (int j = len-1; j > i; j--) {
+            double sum = 0;
+            for (int k = len-1; k > i; k--) {
+                sum -= mat[i * len + k] * mat[k * len + j];
+            }
+            mat[i * len + j] = sum * mat[i * len + i];
+        }
+    }
+}
+
+void u_multiply(double *mat_l, double *mat, double *mat_u, int mat_row_len, int mat_u_len) {
+    for (int i = 0; i < mat_row_len; i++) {
+        for (int j = 0; j < mat_u_len; j++) {
+            mat_l[i * mat_u_len + j] = 0;
+            for (int k = 0; k <= j; k++) {
+                mat_l[i * mat_u_len + j] += mat[i * mat_u_len + k] * mat_u[k * mat_u_len + j];
+            }
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 3) {
         printf("Usage: %s <matrix_size> <seed_number>\n", argv[0]);
@@ -58,8 +122,8 @@ int main(int argc, char *argv[]) {
         int sub_mat_u_row_len = sub_mat_row_len;
         int sub_mat_u_col_len = sub_mat_len;
 
-        double *sub_mat = new double[sub_mat_len * sub_mat_len];
-        double *sub_mat_lu = new double[sub_mat_len * sub_mat_len];
+        double *sub_mat = new double[sub_mat_row_len * sub_mat_col_len];
+        double *sub_mat_lu = new double[sub_mat_row_len * sub_mat_col_len];
         double *sub_mat_l = new double[sub_mat_l_row_len * sub_mat_l_col_len];
         double *sub_mat_u = new double[sub_mat_u_row_len * sub_mat_u_col_len];
         double *sub_mat_recon = new double[sub_mat_len * sub_mat_len];
@@ -86,46 +150,25 @@ int main(int argc, char *argv[]) {
         // LU Decomposition
         for (int step = 0; step <= calc_order; step++) {
             if (row_rank[step] == 0 && col_rank[step] == 0) {
-                for (int k = 0; k < sub_mat_row_len; k++) {
-                    for (int i = k + 1; i < sub_mat_row_len; i++) {
-                        sub_mat_lu[i * sub_mat_col_len + k] /= sub_mat_lu[k * sub_mat_col_len + k];
-                    }
-                    for (int i = k + 1; i < sub_mat_row_len; i++) {
-                        for (int j = k + 1; j < sub_mat_col_len; j++) {
-                            sub_mat_lu[i * sub_mat_col_len + j] -= sub_mat_lu[i * sub_mat_col_len + k] * sub_mat_lu[k * sub_mat_col_len + j];
-                        }
-                    }
-                }
+                lu_decompose(sub_mat_lu, sub_mat_row_len);
                 if (step < comm_per_line-1) {
-                    printf("%2d (%d, %d) - L Send %d\n", rank, row_rank[0], col_rank[0], step);
-                    printf("%2d (%d, %d) - U Send %d\n", rank, row_rank[0], col_rank[0], step);
                     MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, col_comm[step]); // Send to horizontal ones
                     MPI_Bcast(sub_mat_lu, sub_mat_row_len * sub_mat_col_len, MPI_DOUBLE, 0, row_comm[step]); // Send to vertical ones
                 }
             } else if (row_rank[step] == 0) { // Horizontal ones
                 MPI_Bcast(sub_mat_l, sub_mat_l_row_len * sub_mat_l_col_len, MPI_DOUBLE, 0, col_comm[step]);
-                printf("%2d (%d, %d) - L Recv %d\n", rank, row_rank[0], col_rank[0], step);
+                l_inverse(sub_mat_l, sub_mat_l_row_len);
+                l_multiply(sub_mat_lu, sub_mat_l, sub_mat, sub_mat_l_row_len, sub_mat_col_len);
             } else if (col_rank[step] == 0) { // Vertical ones
                 MPI_Bcast(sub_mat_u, sub_mat_u_row_len * sub_mat_u_col_len, MPI_DOUBLE, 0, row_comm[step]);
-                printf("%2d (%d, %d) - U Recv %d\n", rank, row_rank[0], col_rank[0], step);
+                u_inverse(sub_mat_u, sub_mat_u_row_len);
+                u_multiply(sub_mat_lu, sub_mat, sub_mat_u, sub_mat_row_len, sub_mat_u_col_len);
             } else {
 
             }
         }
 
         /*
-        // LU Decomposition
-        for (int k = 0; k < mat_len; k++) {
-            for (int i = k + 1; i < mat_len; i++) {
-                matrixLU[i * mat_len + k] /= matrixLU[k * mat_len + k];
-            }
-            for (int i = k + 1; i < mat_len; i++) {
-                for (int j = k + 1; j < mat_len; j++) {
-                    matrixLU[i * mat_len + j] -= matrixLU[i * mat_len + k] * matrixLU[k * mat_len + j];
-                }
-            }
-        }
-
         // Reconstruct Matrix
         for (int i = 0; i < mat_len; i++) {
             for (int j = 0; j < mat_len; j++) {
