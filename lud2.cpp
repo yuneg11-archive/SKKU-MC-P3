@@ -6,18 +6,22 @@
 
 class Matrix2D {
 public:
-    int len;
-    int row_len;
-    int col_len;
-    int size;
+    const int len;
+    const int row_len;
+    const int col_len;
+    const int size;
     double *data;
 
     Matrix2D(int _row_len, int _col_len)
         : row_len(_row_len), col_len(_col_len), len(_col_len), size(_row_len * _col_len) {
         data = new double[_row_len * _col_len];
     }
-    ~Matrix2D() { delete [] data; }
-    double& operator()(int row, int col) { return data[row * col_len + col]; }
+    ~Matrix2D() {
+        delete [] data;
+    }
+    inline double& operator()(int row, int col) {
+        return data[row * col_len + col];
+    }
     Matrix2D& clear() {
         for (int i = 0; i < row_len; i++) {
             for (int j = 0; j < col_len; j++) {
@@ -26,149 +30,87 @@ public:
         }
         return *this;
     }
-    void copy(Matrix2D& mat) {
-        for (int i = 0; i < row_len; i++) {
-            for (int j = 0; j < col_len; j++) {
-                data[i * col_len + j] = mat(i, j);
+    void lu_decompose_to(Matrix2D& mat_l, Matrix2D& mat_u) {
+        for (int k = 0; k < len; k++) {
+            mat_l(k, k) = 1;
+            mat_u(k, k) = data[k * col_len + k];
+            for (int i = k+1; i < row_len; i++) {
+                mat_l(i, k) = (long double)data[i * col_len + k] / (long double)mat_u(k, k);
+                mat_u(k, i) = data[k * col_len + i];
+            }
+            for (int i = k+1; i < row_len; i++) {
+                for (int j = k+1; j < col_len; j++) {
+                    data[i * col_len + j] -= (long double)mat_l(i, k) * (long double)mat_u(k, j);
+                }
             }
         }
     }
-    void copy_l(Matrix2D& mat) {
+    Matrix2D& inverse_l() {
         for (int i = 0; i < row_len; i++) {
-            for (int j = 0; j < i; j++) {
-                data[i * col_len + j] = mat(i, j);
-            }
             data[i * col_len + i] = 1;
-            for (int j = i+1; j < col_len; j++) {
-                data[i * col_len + j] = 0;
+            for (int j = 0; j < i; j++) {
+                long double sum = 0;
+                for (int k = j; k < i; k++) {
+                    sum -= (long double)data[i * col_len + k] * (long double)data[k * col_len + j];
+                }
+                data[i * col_len + j] = sum;
+            }
+        }
+        return *this;
+    }
+    Matrix2D& inverse_u() {
+        for (int i = row_len-1; i >= 0; i--) {
+            for (int j = col_len-1; j > i; j--) {
+                long double sum = 0;
+                for (int k = j; k > i; k--) {
+                    sum -= (long double)data[i * col_len + k] * (long double)data[k * col_len + j];
+                }
+                data[i * col_len + j] = sum / data[i * col_len + i];
+            }
+            data[i * col_len + i] = 1 / data[i * col_len + i];
+        }
+        return *this;
+    }
+    void multiply_l(Matrix2D& mat_l, Matrix2D& mat) {
+        for (int i = 0; i < row_len; i++) {
+            for (int j = 0; j < col_len; j++) {
+                long double sum = 0;
+                for (int k = 0; k <= i; k++) {
+                    sum += (long double)mat_l(i, k) * (long double)mat(k, j);
+                }
+                data[i * col_len + j] = sum;
             }
         }
     }
-    void copy_u(Matrix2D& mat) {
-        for (int i = 0; i < mat.row_len; i++) {
-            for (int j = 0; j < i; j++) {
-                data[i * col_len + j] = 0;
-            }
-            data[i * col_len + i] = mat(i, i);
-            for (int j = i+1; j < mat.col_len; j++) {
-                data[i * col_len + j] = mat(i, j);
+    void multiply_u(Matrix2D& mat, Matrix2D& mat_u) {
+        for (int i = 0; i < row_len; i++) {
+            for (int j = 0; j < col_len; j++) {
+                long double sum = 0;
+                for (int k = 0; k <= j; k++) {
+                    sum += (long double)mat(i, k) * (long double)mat_u(k, j);
+                }
+                data[i * col_len + j] = sum;
             }
         }
-        for (int i = mat.row_len; i < row_len; i++) {
+    }
+    void multiply_lu(Matrix2D& mat_l, Matrix2D& mat_u, int mode = 0) {
+        for (int i = 0; i < row_len; i++) {
             for (int j = 0; j < col_len; j++) {
-                data[i * col_len + j] = 0;
+                double sum = 0;
+                for (int k = 0; k < mat_l.col_len; k++) {
+                    sum += mat_l(i, k) * mat_u(k, j);
+                }
+                if (mode == -1) {
+                    data[i * col_len + j] -= sum;
+                } else if (mode == +1) {
+                    data[i * col_len + j] += sum;
+                } else {
+                    data[i * col_len + j] = sum;
+                }
             }
         }
     }
 };
-
-void lu_decompose(Matrix2D& mat) {
-    for (int k = 0; k < mat.len; k++) {
-        for (int i = k + 1; i < mat.len; i++) {
-            mat(i, k) /= mat(k, k);
-        }
-        for (int i = k + 1; i < mat.len; i++) {
-            for (int j = k + 1; j < mat.len; j++) {
-                mat(i, j) -= mat(i, k) * mat(k, j);
-            }
-        }
-    }
-}
-
-void l_inverse(Matrix2D& mat) {
-    for (int i = 0; i < mat.len; i++) {
-        mat(i, i) = 1;
-        for (int j = 0; j < i; j++) {
-            double sum = 0;
-            for (int k = j; k < i; k++) {
-                sum -= mat(i, k) * mat(k, j);
-            }
-            mat(i, j) = sum;
-        }
-        for (int j = i+1; j < mat.len; j++) {
-            mat(i, j) = 0;
-        }
-    }
-}
-
-void u_inverse(Matrix2D& mat) {
-    for (int i = mat.len-1; i >= 0; i--) {
-        for (int j = mat.len-1; j > i; j--) {
-            double sum = 0;
-            for (int k = j; k > i; k--) {
-                sum -= mat(i, k) * mat(k, j);
-            }
-            mat(i, j) = sum / mat(i, i);
-        }
-        mat(i, i) = 1 / mat(i, i);
-        for (int j = i-1; j >= 0; j--) {
-            mat(i, j) = 0;
-        }
-    }
-}
-
-void l_multiply(Matrix2D& mat_u, Matrix2D& mat_l, Matrix2D& mat) {
-    for (int i = 0; i < mat_u.row_len; i++) {
-        for (int j = 0; j < mat_u.col_len; j++) {
-            mat_u(i, j) = 0;
-            for (int k = 0; k <= i; k++) {
-                mat_u(i, j) += mat_l(i, k) * mat(k, j);
-            }
-        }
-    }
-}
-
-void u_multiply(Matrix2D& mat_l, Matrix2D& mat, Matrix2D& mat_u) {
-    for (int i = 0; i < mat_l.row_len; i++) {
-        for (int j = 0; j < mat_l.col_len; j++) {
-            mat_l(i, j) = 0;
-            for (int k = 0; k <= j; k++) {
-                mat_l(i, j) += mat(i, k) * mat_u(k, j);
-            }
-        }
-    }
-}
-
-void lu_multiply(Matrix2D& mat_out, Matrix2D& mat1, Matrix2D& mat2, int mode = 0) {
-    for (int i = 0; i < mat_out.row_len; i++) {
-        for (int j = 0; j < mat_out.col_len; j++) {
-            double sum = 0;
-            for (int k = 0; k < mat1.col_len; k++) {
-                sum += mat1(i, k) * mat2(k, j);
-            }
-            if (mode == -1) {
-                mat_out(i, j) -= sum;
-            } else if (mode == +1) {
-                mat_out(i, j) += sum;
-            } else {
-                mat_out(i, j) = sum;
-            }
-        }
-    }
-}
-
-void lu_extract(Matrix2D& mat_l, Matrix2D& mat_u, Matrix2D& mat_lu) {
-    for (int i = 0; i < mat_lu.row_len; i++) {
-        for (int j = 0; j < i; j++) {
-            mat_l(i, j) = mat_lu(i, j);
-            mat_u(i, j) = 0;
-        }
-        mat_l(i, i) = 1;
-        mat_u(i, i) = mat_lu(i, i);
-        for (int j = i+1; j < mat_lu.col_len; j++) {
-            mat_l(i, j) = 0;
-            mat_u(i, j) = mat_lu(i, j);
-        }
-        for (int j = mat_lu.col_len; j < mat_l.col_len; j++) {
-            mat_l(i, j) = 0;
-        }
-    }
-    for (int i = mat_lu.row_len; i < mat_u.row_len; i++) {
-        for (int j = 0; j < mat_u.col_len; j++) {
-            mat_u(i, j) = 0;
-        }
-    }
-}
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -211,23 +153,21 @@ int main(int argc, char *argv[]) {
         int sub_mat_col_len = sub_mat_len - (col_order == comm_per_line-1 ? comm_per_line - mat_len % comm_per_line : 0);
 
         Matrix2D sub_mat(sub_mat_row_len, sub_mat_col_len);
-        Matrix2D sub_mat_lu(sub_mat_row_len, sub_mat_col_len);
+        Matrix2D sub_mat_stage(sub_mat_row_len, sub_mat_col_len);
         Matrix2D sub_mat_l(sub_mat_row_len, sub_mat_len);
         Matrix2D sub_mat_u(sub_mat_len, sub_mat_col_len);
 
         // Build Matrix
         srand(seed);
-        for (int row = 0; row < sub_mat_len * row_order; row++) {
-            for (int col = 0; col < mat_len; col++) {
-                rand();
-            }
+        for (int i = 0; i < sub_mat_len * row_order * mat_len; i++) {
+            rand();
         }
         for (int row = 0; row < sub_mat_row_len; row++) {
             for (int col = 0; col < sub_mat_len * col_order; col++) {
                 rand();
             }
             for (int col = 0; col < sub_mat_col_len; col++) {
-                sub_mat(row, col) = sub_mat_lu(row, col) = (int)rand() / 1000;
+                sub_mat(row, col) = sub_mat_stage(row, col) = (int)rand() / 1000;
             }
             for (int col = sub_mat_len * col_order + sub_mat_col_len; col < mat_len; col++) {
                 rand();
@@ -237,34 +177,28 @@ int main(int argc, char *argv[]) {
         // LU Decomposition
         for (int step = 0; step <= calc_order; step++) {
             if (row_order == step && col_order == step) {
-                lu_decompose(sub_mat_lu);
+                sub_mat_stage.lu_decompose_to(sub_mat_l.clear(), sub_mat_u.clear());
                 if (step < comm_per_line-1) {
-                    MPI_Bcast(sub_mat_lu.data, sub_mat_lu.size, MPI_DOUBLE, 0, row_comm[step]); // Send L
-                    MPI_Bcast(sub_mat_lu.data, sub_mat_lu.size, MPI_DOUBLE, 0, col_comm[step]); // Send U
+                    MPI_Bcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step]); // Send L
+                    MPI_Bcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step]); // Send U
                 }
-                sub_mat_l.copy_l(sub_mat_lu);
-                sub_mat_u.copy_u(sub_mat_lu);
             } else if (row_order == step) {
                 MPI_Bcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step]); // Receive L
-                l_inverse(sub_mat_l);
-                l_multiply(sub_mat_lu, sub_mat_l, sub_mat);
-                MPI_Bcast(sub_mat_lu.data, sub_mat_lu.size, MPI_DOUBLE, 0, col_comm[step]); // Send U
-                sub_mat_u.copy(sub_mat_lu);
+                sub_mat_u.multiply_l(sub_mat_l.inverse_l(), sub_mat_stage);
+                MPI_Bcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step]); // Send U
             } else if (col_order == step) {
                 MPI_Bcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step]); // Receive U
-                u_inverse(sub_mat_u);
-                u_multiply(sub_mat_lu, sub_mat, sub_mat_u);
-                MPI_Bcast(sub_mat_lu.data, sub_mat_lu.size, MPI_DOUBLE, 0, row_comm[step]); // Send L
-                sub_mat_l.copy(sub_mat_lu);
+                sub_mat_l.multiply_u(sub_mat_stage, sub_mat_u.inverse_u());
+                MPI_Bcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step]); // Send L
             } else {
                 MPI_Bcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step]); // Receive L
                 MPI_Bcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step]); // Receive U
-                lu_multiply(sub_mat_lu, sub_mat_l, sub_mat_u, -1);
+                sub_mat_stage.multiply_lu(sub_mat_l, sub_mat_u, -1);
             }
         }
 
         // Reconstruct Matrix
-        Matrix2D& sub_mat_recon = sub_mat_lu.clear();
+        Matrix2D& sub_mat_recon = sub_mat_stage.clear();
         Matrix2D sub_mat_l_buf(sub_mat_row_len, sub_mat_len);
         Matrix2D sub_mat_u_buf(sub_mat_len, sub_mat_col_len);
         Matrix2D *sub_mat_l_cur = &sub_mat_l;
@@ -339,7 +273,7 @@ int main(int argc, char *argv[]) {
                 req_valid[3] = true;
             }
             if (calc_activate == true) {
-                lu_multiply(sub_mat_recon, *sub_mat_l_cur, *sub_mat_u_cur, +1);
+                sub_mat_recon.multiply_lu(*sub_mat_l_cur, *sub_mat_u_cur, +1);
             }
             for (int i = 0; i < 4; i++) {
                 if (req_valid[i] == true) {

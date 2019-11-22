@@ -1,6 +1,6 @@
 CC=g++
 MPICC=mpic++
-FFLAGS=-g -Wall
+FFLAGS=-Wall -Wno-reorder
 
 all: seq par
 
