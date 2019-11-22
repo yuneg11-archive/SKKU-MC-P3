@@ -179,20 +179,28 @@ int main(int argc, char *argv[]) {
             if (row_order == step && col_order == step) {
                 sub_mat_stage.lu_decompose_to(sub_mat_l.clear(), sub_mat_u.clear());
                 if (step < comm_per_line-1) {
-                    MPI_Bcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step]); // Send L
-                    MPI_Bcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step]); // Send U
+                    MPI_Request req1, req2;
+                    MPI_Ibcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step], &req1); // Send L
+                    MPI_Ibcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step], &req2); // Send U
                 }
             } else if (row_order == step) {
-                MPI_Bcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step]); // Receive L
+                MPI_Request req;
+                MPI_Ibcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step], &req); // Receive L
+                MPI_Wait(&req, MPI_STATUS_IGNORE);
                 sub_mat_u.multiply_l(sub_mat_l.inverse_l(), sub_mat_stage);
-                MPI_Bcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step]); // Send U
+                MPI_Ibcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step], &req); // Send U
             } else if (col_order == step) {
-                MPI_Bcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step]); // Receive U
+                MPI_Request req;
+                MPI_Ibcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step], &req); // Receive U
+                MPI_Wait(&req, MPI_STATUS_IGNORE);
                 sub_mat_l.multiply_u(sub_mat_stage, sub_mat_u.inverse_u());
-                MPI_Bcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step]); // Send L
+                MPI_Ibcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step], &req); // Send L
             } else {
-                MPI_Bcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step]); // Receive L
-                MPI_Bcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step]); // Receive U
+                MPI_Request req1, req2;
+                MPI_Ibcast(sub_mat_l.data, sub_mat_l.size, MPI_DOUBLE, 0, row_comm[step], &req1); // Receive L
+                MPI_Ibcast(sub_mat_u.data, sub_mat_u.size, MPI_DOUBLE, 0, col_comm[step], &req2); // Receive U
+                MPI_Wait(&req1, MPI_STATUS_IGNORE);
+                MPI_Wait(&req2, MPI_STATUS_IGNORE);
                 sub_mat_stage.multiply_lu(sub_mat_l, sub_mat_u, -1);
             }
         }
