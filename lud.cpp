@@ -1,9 +1,51 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
-#include "sys/time.h"
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
+
+class Matrix2D {
+public:
+    const int len;
+    const int row_len;
+    const int col_len;
+    const int size;
+    double *data;
+
+    Matrix2D(int _row_len, int _col_len)
+        : row_len(_row_len), col_len(_col_len), len(_col_len), size(_row_len * _col_len) {
+        data = new double[_row_len * _col_len];
+    }
+    ~Matrix2D() {
+        delete [] data;
+    }
+    inline double& operator()(int row, int col) {
+        return data[row * col_len + col];
+    }
+    Matrix2D& clear() {
+        for (int i = 0; i < row_len; i++) {
+            for (int j = 0; j < col_len; j++) {
+                data[i * col_len + j] = 0;
+            }
+        }
+        return *this;
+    }
+    void lu_decompose_to(Matrix2D& mat_l, Matrix2D& mat_u) {
+        for (int k = 0; k < len; k++) {
+            mat_l(k, k) = 1;
+            mat_u(k, k) = data[k * col_len + k];
+            for (int i = k+1; i < row_len; i++) {
+                mat_l(i, k) = (long double)data[i * col_len + k] / (long double)mat_u(k, k);
+                mat_u(k, i) = data[k * col_len + i];
+            }
+            for (int i = k+1; i < row_len; i++) {
+                for (int j = k+1; j < col_len; j++) {
+                    data[i * col_len + j] -= (long double)mat_l(i, k) * (long double)mat_u(k, j);
+                }
+            }
+        }
+    }
+};
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -11,66 +53,46 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    struct timeval start;
-    struct timeval end;
+    int mat_len = atoi(argv[1]);
+    int seed = atoi(argv[2]);
 
-    int n = atoi(argv[1]);
-    int s = atoi(argv[2]);
-
-    double *matrixA = new double[n * n];
-    double *matrixLU = new double[n * n];
-    double *matrixB = new double[n * n];
+    Matrix2D mat(mat_len, mat_len);
+    Matrix2D mat_stage(mat_len, mat_len);
+    Matrix2D mat_l(mat_len, mat_len);
+    Matrix2D mat_u(mat_len, mat_len);
 
     // Build Matrix
-    srand(s);
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            matrixA[i * n + j] = matrixLU[i * n + j] = (double)rand();
+    srand(seed);
+    for (int i = 0; i < mat_len; i++) {
+        for (int j = 0; j < mat_len; j++) {
+            mat(i, j) = mat_stage(i, j) = (int)rand() / 1000;
         }
     }
 
     // LU Decomposition
-    gettimeofday(&start, NULL);
-    for (int k = 0; k < n; k++) {
-        for (int i = k + 1; i < n; i++) {
-            matrixLU[i * n + k] /= matrixLU[k * n + k];
-        }
-        for (int i = k + 1; i < n; i++) {
-            for (int j = k + 1; j < n; j++) {
-                matrixLU[i * n + j] -= matrixLU[i * n + k] * matrixLU[k * n + j];
-            }
-        }
-    }
-    gettimeofday(&end, NULL);
-    printf("LU Decomposition: %f s\n",(end.tv_sec-start.tv_sec)+(float)(end.tv_usec-start.tv_usec) / 1000000.0);
+    mat_stage.lu_decompose_to(mat_l.clear(), mat_u.clear());
 
     // Reconstruct Matrix
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            int min_idx = min(i - 1, j);
-            matrixB[i * n + j] = (j >= i ? matrixLU[i * n + j] : 0);
+    Matrix2D& mat_recon = mat_stage.clear();
+    for (int i = 0; i < mat_len; i++) {
+        for (int j = 0; j < mat_len; j++) {
+            int min_idx = min(i, j);
             for (int k = 0; k <= min_idx; k++) {
-                matrixB[i * n + j] += matrixLU[i * n + k] * matrixLU[k * n + j];
+                mat_stage(i, j) += mat_l(i, k) * mat_u(k, j);
             }
-            matrixB[i * n + j] = matrixB[i * n + j];
         }
     }
 
     // Calculate Matrix Difference
     double diff = 0;
-    for (int j = 0; j < n; j++) {
+    for (int j = 0; j < mat_recon.col_len; j++) {
         double row_sum = 0;
-        for (int i = 0; i < n; i++) {
-            row_sum += (matrixA[i * n + j] - matrixB[i * n + j]) * (matrixA[i * n + j] - matrixB[i * n + j]);
+        for (int i = 0; i < mat_recon.row_len; i++) {
+            row_sum += (mat(i, j) - mat_recon(i, j)) * (mat(i, j) - mat_recon(i, j));
         }
         diff += sqrt(row_sum);
     }
-    printf("Sum of difference: %.10lf\n", diff);
-
-    // Memory Deallocation
-    delete [] matrixA;
-    delete [] matrixLU;
-    delete [] matrixB;
+    printf("%lf\n", diff);
 
     return 0;
 }
