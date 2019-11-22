@@ -10,9 +10,6 @@ seq: lud.cpp
 par: lud2.cpp
 	$(MPICC) $(FFLAGS) lud2.cpp -o lud_par
 
-verify: verify.cpp
-	$(CC) $(FFLAGS) verify.cpp -o verify
-
 clean:
-	rm -f lud_seq lud_par verify
+	rm -f lud_seq lud_par
 
